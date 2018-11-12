@@ -109,7 +109,6 @@ layer3_dim = 50
 # layer4_dim = 20
 
 input = Input(shape=(L, ))
-input_new = Dropout(0.2, input_shape=(L, ))
 encoded1 = Dense(layer1_dim, activation='relu')(input)
 encoded2 = Dense(layer2_dim, activation='relu')(encoded1)
 encoded3 = Dense(layer3_dim, activation='relu')(encoded2)
@@ -118,7 +117,7 @@ output = Dense(num_clusters, activation='sigmoid')(encoded3)
 
 mlp = Model(input, output)
 mlp.compile(loss='categorical_crossentropy', optimizer='nadam', metrics=['accuracy'])
-mlp.fit(train, bin_train_target, epochs=epoch, batch_size=batch_size, shuffle=True)  # validation_split=0.1
+mlp.fit(train, bin_train_target, epochs=epoch, batch_size=batch_size, shuffle=True) 
 
 preds = mlp.predict(test)
 predictions = np.argmax(preds, axis=1)
