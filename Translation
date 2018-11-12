@@ -1,0 +1,116 @@
+import numpy as np
+import matlab.engine
+import commpy.channels
+
+
+def h_2(p):
+    m = np.shape(p)[0]
+    n = np.shape(p)[1]
+    h2 = np.zeros((m, n))
+    if np.all([m == 1, n == 1]):
+        h2 = -p*np.log2(p) - (1 - p)*np.log2(1 - p)
+    else:
+        for i in range(int(m)):
+            for j in range(int(n)):
+                if np.any([p[i, j] == 0, p[i, j] == 1]):
+                    h2[i, j] = 0
+                else:
+                    h2[i, j] = -p[i, j] * np.log2(p[i, j]) - (1 - p[i, j]) * np.log2(1 - p[i, j])
+    return h2
+
+
+def get_type_entropy(y, z, *args):
+    if len(args) == 1:
+        L = y.size
+        p = sum(y) / L
+        entropy = h_2(p)
+    else:
+        L = y.size
+        p00 = 0
+        p01 = 0
+        p10 = 0
+        p11 = 0
+        for j in range(L):
+            if np.all([y[j] == 0, z[j] == 0]):
+                p00 = p00 + 1
+            elif np.all([y[j] == 0, z[j] == 1]):
+                p01 = p01 + 1
+            elif np.all([y[j] == 1, z[j] == 0]):
+                p10 = p10 + 1
+            else:
+                p11 = p11 + 1
+        p00 = p00 / L
+        p01 = p01 / L
+        p10 = p10 / L
+        p11 = p11 / L
+        # entropy = h_2([p00, p01, p10, p11])
+        entropy = -p00 * np.log2(p00) - p01 * np.log2(p01) - p10 * np.log2(p10) - p11 * np.log2(p11)
+    return entropy
+
+
+eng = matlab.engine.start_matlab()
+
+b = 0  # value of frozen bits
+R = 0.5  # compression rate
+D = eng.hbinv(1-R)  # corresponding distortion
+
+MM = np.array([[500]])  # number of users
+# MM = np.linspace(500, 2000, num=4)
+
+bsc_e = np.array([[0.3]])  # crossover probability of BSC
+# bsc_e = np.linspace(0.1, 0.4, num=7)
+
+N = np.array([[256]])  # data length
+# N = np.array([[64, 128, 256]])
+
+# find error rate
+for im in range(MM.size):
+    M = MM[0, im]
+    err_mtx = np.zeros((bsc_e.size, N.size))
+    for ie in range(bsc_e.size):
+        e = bsc_e[0, ie]
+        err = np.zeros((1, N.size))
+        for i in range(N.size):
+            L = N[0, i]
+            K = int(np.round(L*R))
+
+            Z = eng.get_bec_bhattacharyya(float(L), eng.h_2(D))
+            index = np.argsort(Z).ravel()
+            index = index[::-1]  # sort Z descend using 2 steps
+            free_index = index[L-K:L]+1  # messages indices ‘+1’ is to be adapted for MATLAB
+            frozen_index = index[0:L-K]+1  # frozen indices
+            free_index = matlab.int64(free_index.tolist())  # preparation
+            frozen_index = matlab.int64(frozen_index.tolist())
+
+            data_u = np.zeros((M, L))  # original data
+            data_y = np.zeros((M, L))  # compressed data
+            data_y2 = np.zeros((M, L))  # reconstruction of compressed data
+            data_z = np.zeros((M, L))  # observation
+            h_y = np.zeros((1, M))
+            h_z = np.zeros((1, M))
+            I_xz = np.zeros((1, M))
+            w_hat = np.zeros((1, M))
+
+            for j in range(M):
+                data_u[j, :] = np.random.rand(1, L) <= 0.5
+                temp = eng.sc_SC(matlab.double(data_u[j, :].tolist()), free_index, frozen_index, D)
+                data_y[j, :] = np.asarray(temp).ravel()
+
+                temp = eng.channel_encoder(matlab.double(data_y[j, :].tolist()))
+                data_y2[j, :] = np.asarray(temp).ravel()
+
+                h_y[0, j] = eng.h_2(float(np.mean(data_y2[j, :])))
+            for j in range(M):
+                data_z[j, :] = commpy.channels.bsc(np.int_(data_u[j, :]), e)
+        # MMI identification method (This period can take much time. You can uncomment the following 9 lines for the final identification)
+        #         h_z[0, j] = h_2(np.array([[np.mean(data_z[j, :])]]))
+        #         for k in range(M):
+        #             h_xz = get_type_entropy(data_z[j, :], data_y2[k, :])
+        #             I_xz[0, k] = h_y[0, k] + h_z[0, j] - h_xz
+        #         w_hat[0, j] = np.argmax(I_xz)
+        #         if w_hat[0, j] != j:
+        #             err[0, i] = err[0, i] + 1
+        # err = err / M
+        # err_mtx[ie, :] = err
+
+eng.quit()
